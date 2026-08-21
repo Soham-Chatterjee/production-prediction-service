@@ -1,0 +1,51 @@
+{
+    "model_name": "mock-churn-predictor",
+    "model_version": "v1.0",
+    "num_features": 8,
+    "model_type": "logistic_regression",
+    "features": {
+        "credit_score": {
+            "type": "float",
+            "description": "The credit score of the customer."
+        },
+        "age": {
+            "type": "integer",
+            "description": "The age of the customer."
+        },
+        "tenure": {
+            "type": "integer",
+            "description": "The number of months the customer has been with the company."
+        },
+        "balance": {
+            "type": "float",
+            "description": "The account balance of the customer."
+        },
+        "num_of_products": {
+            "type": "integer",
+            "description": "The number of products the customer has with the company."
+        },
+        "has_cr_card": {
+            "type": "boolean",
+            "description": "Whether the customer has a credit card."
+        },
+        "is_active_member": {
+            "type": "boolean",
+            "description": "Whether the customer is an active member."
+        },
+        "estimated_salary": {
+            "type": "float",
+            "description": "The estimated salary of the customer."
+        }
+    },
+    "weights": {
+        "intercept": -0.2,
+        "credit_score": -0.001,
+        "age": 0.05,
+        "tenure": -0.05,
+        "balance": -0.00001,
+        "num_of_products": -0.2,
+        "has_cr_card": -0.1,
+        "is_active_member": -1.2,
+        "estimated_salary": 0.000002
+    }
+}
