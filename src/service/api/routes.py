@@ -1,0 +1,66 @@
+from fastapi import APIRouter, Depends, Request
+from src.engine.predict import PredictionEngine
+from .dependencies import get_engine
+from src.schemas.responses import HealthResponse, ModelMetadataResponse, PredictionResponse
+from src.schemas.requests import PredictionRequest
+from src.schemas.exceptions import InvalidRequest, MissingRequiredFeatures, UnknownAPIException
+
+import uuid
+
+router = APIRouter()
+
+@router.get("/health", tags=["Health Check"], response_model=HealthResponse)
+def health_check(request: Request):
+    """
+    Health check endpoint to verify that the service is running.
+    """
+    return HealthResponse(status="healthy", api_version=request.app.version)
+
+@router.get("/model", tags=["Model"], response_model=ModelMetadataResponse)
+def get_model_metadata(engine: PredictionEngine = Depends(get_engine)):
+    """
+    Endpoint to retrieve the metadata of the deployed model.
+    """
+    metadata = engine.get_metadata()
+    return ModelMetadataResponse(
+        model_name=metadata.model_name,
+        model_version=metadata.model_version,
+        num_features=metadata.num_features,
+        model_type=metadata.model_type
+    )
+
+@router.post("/predict", tags=["Prediction"], response_model=PredictionResponse)
+def predict(prediction_request: PredictionRequest, engine: PredictionEngine = Depends(get_engine)):
+    """
+    Endpoint to make predictions using the deployed model.
+    """
+    expected_features = set(engine.metadata.features.keys())
+    missing_features = expected_features - set(prediction_request.features.keys())
+
+    if missing_features:
+        raise InvalidRequest(f"Missing required features: {', '.join(sorted(missing_features))}")
+    
+    try:
+
+        prediction = engine.predict(prediction_request)
+
+        return PredictionResponse(
+            response_id=str(uuid.uuid4()),
+            request_id=prediction_request.request_id,
+            prediction={
+                "churn_probability": prediction.churn_probability,
+                "prediction": prediction.prediction,
+            },
+            model={
+                "name": engine.metadata.model_name,
+                "version": engine.metadata.model_version
+            },
+            metadata={
+                "processing_time_ms": prediction.processing_time_ms
+            }
+        )
+    except MissingRequiredFeatures as e:
+        raise InvalidRequest(str(e)) from e
+
+    except Exception as e:
+        raise UnknownAPIException(f"An unexpected error occurred: {e}") from e

@@ -1,0 +1,19 @@
+[project]
+name = "production-prediction-service"
+version = "2026.00.01"
+authors = [
+    {name = "Soham Chatterjee", email = "sohamchatterjee2324@gmail.com"}
+]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.141.1",
+    "pydantic>=2.13.4",
+    "uvicorn>=0.52.4",
+]
+
+
+[project.optional-dependencies]
+dev = ["httpx2", "pytest"]
