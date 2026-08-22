@@ -3,11 +3,22 @@ from src.engine.predict import PredictionEngine
 from .dependencies import get_engine
 from src.schemas.responses import HealthResponse, ModelMetadataResponse, PredictionResponse
 from src.schemas.requests import PredictionRequest
-from src.schemas.exceptions import InvalidRequest, MissingRequiredFeatures, UnknownAPIException
+from src.schemas.exceptions import InvalidRequest, MissingRequiredFeatures, UnknownAPIException, ModelInitializationError
 
 import uuid
 
 router = APIRouter()
+
+
+def _get_engine_from_state(request: Request) -> PredictionEngine:
+    """Helper to safely retrieve the engine from app state."""
+    # Check if there was an initialization error
+    if hasattr(request.app.state, "initialization_error") and request.app.state.initialization_error:
+        raise request.app.state.initialization_error
+    
+    if not hasattr(request.app.state, "engine") or request.app.state.engine is None:
+        raise ModelInitializationError("Prediction engine not initialized")
+    return request.app.state.engine
 
 @router.get("/health", tags=["Health Check"], response_model=HealthResponse)
 def health_check(request: Request):
@@ -17,10 +28,11 @@ def health_check(request: Request):
     return HealthResponse(status="healthy", api_version=request.app.version)
 
 @router.get("/model", tags=["Model"], response_model=ModelMetadataResponse)
-def get_model_metadata(engine: PredictionEngine = Depends(get_engine)):
+def get_model_metadata(request: Request):
     """
     Endpoint to retrieve the metadata of the deployed model.
     """
+    engine = _get_engine_from_state(request)
     metadata = engine.get_metadata()
     return ModelMetadataResponse(
         model_name=metadata.model_name,
@@ -30,10 +42,11 @@ def get_model_metadata(engine: PredictionEngine = Depends(get_engine)):
     )
 
 @router.post("/predict", tags=["Prediction"], response_model=PredictionResponse)
-def predict(prediction_request: PredictionRequest, engine: PredictionEngine = Depends(get_engine)):
+def predict(prediction_request: PredictionRequest, request: Request):
     """
     Endpoint to make predictions using the deployed model.
     """
+    engine = _get_engine_from_state(request)
     expected_features = set(engine.metadata.features.keys())
     missing_features = expected_features - set(prediction_request.features.keys())
 
