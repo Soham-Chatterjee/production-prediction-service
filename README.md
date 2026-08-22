@@ -6,24 +6,28 @@ A small FastAPI service that exposes a metadata-driven customer churn prediction
 
 ```mermaid
 flowchart LR
+		Startup[Application startup]
+		Lifespan[Lifespan context manager]
+		Engine[PredictionEngine]
+		Metadata[(metadata.json)]
+		AppState[app.state.engine]
 		Client[API client]
 		App[FastAPI application]
 		Validation[Pydantic request validation]
 		Routes[API routes]
-		Dependency[Engine dependency]
-		Engine[PredictionEngine]
-		Metadata[(metadata.json)]
 		Response[Pydantic response models]
 		Error[Exception handlers]
 
+		Startup --> Lifespan
+		Lifespan --> Engine
+		Engine --> Metadata
+		Lifespan --> AppState
 		Client --> App
 		App --> Validation
 		Validation -->|valid request| Routes
 		Validation -->|invalid request| Error
-		Routes --> Dependency
-		Dependency --> Engine
-		Engine --> Metadata
-		Routes --> Engine
+		Routes --> AppState
+		AppState --> Engine
 		Engine --> Response
 		Response --> App
 		Routes -->|API or model error| Error
@@ -35,13 +39,14 @@ The same diagram is available on its own in [docs/architecture.md](docs/architec
 
 At runtime, the request flow is:
 
-1. FastAPI receives an HTTP request.
-2. Pydantic validates the top-level `PredictionRequest` fields.
-3. The route obtains a `PredictionEngine` through the `get_engine` dependency.
-4. The engine loads and validates the local model metadata.
-5. The route verifies that every configured feature is present.
-6. The engine calculates log odds, converts them to a probability, assigns a risk category, and records calculation time.
-7. The route wraps the result in a `PredictionResponse`.
+1. Application startup triggers the FastAPI lifespan context manager.
+2. The lifespan initializes the `PredictionEngine` and stores it in `app.state.engine`.
+3. The engine loads and validates the local model metadata.
+4. Requests arrive and FastAPI validates the top-level `PredictionRequest` fields.
+5. The route retrieves the engine from `app.state.engine`.
+6. The route verifies that every configured feature is present.
+7. The engine calculates log odds, converts them to a probability, assigns a risk category, and records calculation time.
+8. The route wraps the result in a `PredictionResponse`.
 
 ## Problem
 
@@ -56,7 +61,7 @@ This service addresses that boundary for a churn-style prediction workflow:
 - Return a stable response containing the prediction, model identity, and processing time.
 - Expose health and model metadata endpoints for operational checks.
 
-The current implementation is a deterministic reference service. It is suitable for local development, API contract work, and model-serving experiments; it is not yet a production deployment of a trained ML artifact.
+The current implementation is a deterministic reference service with fail-fast model initialization. It is suitable for local development, API contract work, and model-serving experiments; it is not yet a production deployment of a trained ML artifact.
 
 ## Design
 
@@ -109,7 +114,8 @@ The category thresholds are:
 ### Separation of concerns
 
 - `PredictionEngine` owns metadata loading and prediction math.
-- Route handlers own HTTP request and response composition.
+- FastAPI lifespan manages engine initialization at application startup.
+- Route handlers own HTTP request and response composition, accessing the engine from `app.state`.
 - Pydantic models define the public data shape.
 - Exception handlers translate known failures into HTTP responses.
 - The metadata file keeps model identity, feature documentation, and weights configurable without changing scoring code.
@@ -253,7 +259,7 @@ The engine reads `src/engine/metadata.json` at initialization. The file must con
 
 The `weights` object contains `intercept` and the coefficients used by the engine. The `features` object documents the expected feature keys and is also used by the API route to detect missing inputs.
 
-There are currently no environment-variable settings or external service dependencies. Changing metadata requires restarting the process because the engine loads it during dependency creation.
+The engine loads metadata once at application startup via the FastAPI lifespan context manager. If metadata is invalid, the application fails to start. This ensures that either the service is fully operational with a valid model, or it fails immediately rather than later during a request.
 
 ## Testing
 
@@ -343,10 +349,10 @@ For future incidents, capture the request correlation identifier (`request_id`),
 
 ## Design Decisions
 
-- **FastAPI:** Provides typed request parsing, dependency injection, OpenAPI documentation, and a lightweight HTTP layer.
+- **FastAPI:** Provides typed request parsing, OpenAPI documentation, a lightweight HTTP layer, and a lifespan context manager for application startup/shutdown.
 - **Pydantic models:** Make required top-level fields explicit and produce consistent validation behavior.
 - **JSON metadata:** Keeps the example model inspectable and easy to replace while avoiding a database or model registry dependency.
-- **Dependency-created engine:** Keeps route signatures testable and allows dependency overrides in integration tests. A production deployment should consider caching a validated engine rather than rebuilding it per request.
+- **Lifespan-initialized engine:** The engine is created once at application startup and stored in `app.state`. This ensures the service either starts fully operational or fails immediately. Routes access the pre-initialized engine from app state, making them lightweight and testable.
 - **Stable response envelope:** Separates prediction values, model identity, and timing metadata so consumers can evolve independently.
 - **Custom exception handlers:** Prevent implementation details from leaking into client responses and provide predictable status codes.
 - **Separate unit and integration tests:** Unit tests isolate model behavior; integration tests verify the complete HTTP contract.
@@ -358,10 +364,9 @@ For future incidents, capture the request correlation identifier (`request_id`),
 - Feature values are stored in a plain `dict`, so the API does not enforce per-feature types, ranges, units, or domain constraints.
 - The engine has a hard-coded required-feature list that can drift from the feature definitions in metadata.
 - Model metadata is loaded from the local filesystem and is not versioned or fetched from a model registry at runtime.
-- The dependency creates a new engine and reads metadata for each request that uses it; this adds avoidable overhead.
 - There is no authentication, authorization, rate limiting, request size policy, or abuse protection.
 - There is no persistence, batch prediction endpoint, asynchronous job workflow, or request queue.
-- There is no structured logging, metrics exporter, tracing, alerting, or health distinction between process health and model readiness.
+- There is no structured logging, metrics exporter, tracing, alerting, or automatic health distinction between process availability and model readiness (the current fail-fast startup ensures model is valid if the process runs, but there is no explicit health endpoint for this distinction).
 - Processing time measures only the arithmetic block, so it should not be treated as end-to-end latency.
 - Error handling returns generic `500` responses for unexpected failures and does not yet expose a machine-readable error code.
 - The current test suite does not include load tests, contract tests against deployed infrastructure, security tests, or model-quality evaluation.
@@ -377,8 +382,7 @@ For future incidents, capture the request correlation identifier (`request_id`),
 
 ### Throughput and latency
 
-- Cache a validated engine and metadata rather than constructing it for every request.
-- Benchmark request bottlenecks across parsing, dependency creation, model inference, serialization, and network layers.
+- Benchmark request bottlenecks across parsing, model inference, serialization, and network layers.
 - Add load and stress tests with realistic concurrency and payload distributions.
 - Measure and publish p50, p95, p99, maximum latency, throughput, error rate, and saturation signals.
 - Profile CPU and memory use, then tune worker counts, connection limits, payload handling, and model execution.

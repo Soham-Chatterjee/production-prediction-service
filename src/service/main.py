@@ -1,12 +1,35 @@
+from contextlib import asynccontextmanager
 from src.engine.predict import PredictionEngine
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from .api.routes import router
 from src.schemas.exceptions import ModelInitializationError, InvalidRequest, UnknownAPIException
+from src.service.api.dependencies import get_engine
 
-app = FastAPI(title="Production Prediction Service", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize the engine (must succeed for app to be usable)
+    try:
+        app.state.engine = get_engine()
+        app.state.initialization_error = None
+    except ModelInitializationError as e:
+        # Store the error - routes will check for this
+        app.state.initialization_error = e
+        app.state.engine = None
+    yield
+    # Shutdown: Cleanup if needed
+    pass
+
+
+app = FastAPI(
+    title="Production Prediction Service",
+    version="1.0.0",
+    lifespan=lifespan
+)
 app.include_router(router)
+
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(request: Request, exc: RequestValidationError):
