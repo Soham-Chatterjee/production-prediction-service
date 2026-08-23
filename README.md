@@ -17,11 +17,15 @@ flowchart LR
 		Routes[API routes]
 		Response[Pydantic response models]
 		Error[Exception handlers]
+		Frontend[Streamlit frontend]
+		User[User]
 
 		Startup --> Lifespan
 		Lifespan --> Engine
 		Engine --> Metadata
 		Lifespan --> AppState
+		User --> Frontend
+		Frontend -->|HTTP JSON request| App
 		Client --> App
 		App --> Validation
 		Validation -->|valid request| Routes
@@ -47,6 +51,13 @@ At runtime, the request flow is:
 6. The route verifies that every configured feature is present.
 7. The engine calculates log odds, converts them to a probability, assigns a risk category, and records calculation time.
 8. The route wraps the result in a `PredictionResponse`.
+
+The repository also includes a Streamlit consumer in `src/frontend/app.py`.
+It initializes the engine before rendering, collects the customer ID and all
+required features, generates `request_id` with `uuid.uuid4()` on submission,
+and calls the running `/predict` API. The user sees the churn probability as a
+percentage and a color-coded `Churn Risk: LOW`, `MEDIUM`, or `HIGH` result;
+request IDs, model metadata, and processing time remain technical details.
 
 ## Problem
 
@@ -82,9 +93,11 @@ src/
 		api/
 			dependencies.py   PredictionEngine dependency factory
 			routes.py         /health, /model, and /predict routes
+	frontend/
+		app.py             Streamlit prediction client
 tests/
 	unit/                 Engine, schema, and dependency tests
-	integration/          HTTP API behavior tests
+	integration/          HTTP API and frontend/API contract tests
 docs/
 	architecture.md      Standalone Mermaid architecture diagram
 ```
@@ -116,6 +129,7 @@ The category thresholds are:
 - `PredictionEngine` owns metadata loading and prediction math.
 - FastAPI lifespan manages engine initialization at application startup.
 - Route handlers own HTTP request and response composition, accessing the engine from `app.state`.
+- The Streamlit frontend owns user input, client-side validation, API calls, and user-friendly result/error presentation.
 - Pydantic models define the public data shape.
 - Exception handlers translate known failures into HTTP responses.
 - The metadata file keeps model identity, feature documentation, and weights configurable without changing scoring code.
@@ -200,6 +214,11 @@ Successful response:
 }
 ```
 
+The Streamlit frontend generates `request_id` automatically for each
+submission; users enter only the `customer_id` and feature values. It formats
+`churn_probability` as a percentage and displays the bucket as `Churn Risk`:
+`LOW` (green), `MEDIUM` (amber), or `HIGH` (red).
+
 Response codes:
 
 | Code | Meaning |
@@ -245,6 +264,22 @@ For a non-reloading local process:
 ```powershell
 uv run uvicorn src.service.main:app --host 0.0.0.0 --port 8000
 ```
+
+### Start the Streamlit frontend
+
+Start the API first, then run the frontend from the repository root:
+
+```powershell
+uv run streamlit run src/frontend/app.py
+```
+
+The frontend validates the prediction engine during startup and stops with a
+user-friendly error if the model metadata cannot be loaded. It sends requests
+to `http://127.0.0.1:8000` by default; set `PREDICTION_API_URL` to use another
+API address.
+
+The API and frontend are separate processes. Start the API before submitting
+a prediction from the frontend.
 
 ### Model metadata
 
@@ -297,6 +332,7 @@ The test suite covers:
 - Request and response schema requirements.
 - Dependency error translation.
 - Health, model, and prediction endpoints.
+- Streamlit payload construction, API response extraction, API failures, and frontend engine initialization failures.
 - HTTP `404`, `422`, and `500` behavior.
 
 ## Failure Handling
@@ -312,6 +348,11 @@ Known failures are translated at the HTTP boundary:
 | Unknown route | FastAPI default handler | `404` | `Not Found` |
 
 The service deliberately avoids returning model internals in generic `500` responses. Detailed exception context remains available in the server process for logging, but the current application does not yet configure structured logging or centralized error reporting.
+
+The Streamlit frontend translates connection failures, API error responses,
+malformed API responses, and unexpected request failures into concise messages
+without exposing technical exception details. Its startup check also prevents
+the UI from rendering when the local engine cannot initialize.
 
 One important operational distinction is that Pydantic request validation happens before the route function runs. Missing `customer_id` therefore uses the `RequestValidationError` handler, while a missing key inside the free-form `features` dictionary is detected by the prediction route.
 
@@ -366,10 +407,10 @@ For future incidents, capture the request correlation identifier (`request_id`),
 - Model metadata is loaded from the local filesystem and is not versioned or fetched from a model registry at runtime.
 - There is no authentication, authorization, rate limiting, request size policy, or abuse protection.
 - There is no persistence, batch prediction endpoint, asynchronous job workflow, or request queue.
-- There is no structured logging, metrics exporter, tracing, alerting, or automatic health distinction between process availability and model readiness (the current fail-fast startup ensures model is valid if the process runs, but there is no explicit health endpoint for this distinction).
+- There is no structured logging, metrics exporter, tracing, alerting, or explicit health distinction between process availability and model readiness. The API has a `/health` endpoint and fail-fast startup, while the frontend separately validates its local engine at startup.
 - Processing time measures only the arithmetic block, so it should not be treated as end-to-end latency.
-- Error handling returns generic `500` responses for unexpected failures and does not yet expose a machine-readable error code.
-- The current test suite does not include load tests, contract tests against deployed infrastructure, security tests, or model-quality evaluation.
+- API error handling returns generic `500` responses for unexpected failures and does not expose a machine-readable error code. The frontend provides user-friendly translations, but it does not replace the API error contract.
+- The test suite does not include load tests, contract tests against deployed infrastructure, security tests, UI/browser automation, or model-quality evaluation.
 
 ## Future Improvements
 
@@ -378,6 +419,7 @@ For future incidents, capture the request correlation identifier (`request_id`),
 - Plug in an actual trained ML model with a defined serialization format and compatibility contract.
 - Load models through a model registry or artifact store with checksums, staged rollouts, and rollback support.
 - Validate model and feature schema compatibility at startup.
+- Keep the frontend feature controls and API validation generated from one authoritative schema, including types, ranges, and units.
 - Add model-quality metrics such as precision, recall, ROC-AUC, calibration, drift, and segment-level performance.
 
 ### Throughput and latency
