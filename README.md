@@ -364,6 +364,25 @@ The current scoring operation is $O(n)$ in the number of configured features and
 
 Performance work should measure the complete request lifecycle, not only the engine timer. At minimum, collect request count, success and error counts, latency percentiles such as p50, p95, and p99, and resource utilization. Measurements should be separated by endpoint and status code, and should include realistic payload sizes and concurrency.
 
+## Concurrency Benchmark
+
+The service was tested with increasing concurrent request loads.
+
+| Concurrency | Requests | Successes | Failures | p50 (ms) | p95 (ms) | p99 (ms) | Throughput (RPS) |
+|------------:|---------:|----------:|---------:|---------:|---------:|---------:|-----------------:|
+| 1           | 20       | 20        | 0        | 4.19     | 5.67     | 19.61    | 189.07           |
+| 10          | 200      | 200       | 0        | 40.90    | 65.91    | 75.53    | 164.98           |
+| 50          | 1,000    | 1,000     | 0        | 158.91   | 277.47   | 305.37   | 166.86           |
+| 100         | 2,000    | 2,000     | 0        | 343.22   | 616.64   | 675.92   | 148.68           |
+
+### Observations:
+
+- No request failures were observed.
+- Latency increased significantly with concurrency.
+- Throughput plateaued around ~150–170 RPS.
+- p99 latency increased substantially under high concurrency.
+- Further investigation is required to identify the limiting resource.
+
 ## Incident Analysis
 
 The following incidents were identified and resolved during development:

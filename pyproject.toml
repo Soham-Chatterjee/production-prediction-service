@@ -17,4 +17,5 @@ dependencies = [
 
 
 [project.optional-dependencies]
-dev = ["httpx2", "pytest"]
+dev = ["httpx>=0.28.0", "pytest"]
+load-test = ["httpx>=0.28.0"]
