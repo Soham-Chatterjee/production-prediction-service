@@ -131,6 +131,18 @@ def test_predict_returns_prediction_envelope(client, valid_payload):
     assert body["metadata"]["processing_time_ms"] >= 0
 
 
+def test_predict_exposes_server_timing_headers(valid_payload):
+    with TestClient(main.app) as service_client:
+        response = service_client.post("/predict", json=valid_payload)
+
+    assert response.status_code == 200
+    assert float(response.headers["X-Server-Total-Time-Ms"]) >= 0
+    assert float(response.headers["X-Server-Engine-Lookup-Ms"]) >= 0
+    assert float(response.headers["X-Server-Feature-Validation-Ms"]) >= 0
+    assert float(response.headers["X-Server-Prediction-Ms"]) >= 0
+    assert float(response.headers["X-Server-Response-Creation-Ms"]) >= 0
+
+
 def test_predict_rejects_missing_required_request_field(client, valid_payload):
     del valid_payload["customer_id"]
 

@@ -18,4 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["httpx>=0.28.0", "pytest"]
-load-test = ["httpx>=0.28.0"]
+load-test = [
+    "httpx>=0.28.0",
+    "psutil>=5.9.0",
+]

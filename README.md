@@ -383,6 +383,31 @@ The service was tested with increasing concurrent request loads.
 - p99 latency increased substantially under high concurrency.
 - Further investigation is required to identify the limiting resource.
 
+### Investigation summary
+
+The initial benchmark showed a reproducible capacity limitation: throughput
+stopped scaling while p95 and p99 latency increased sharply, especially at 100
+concurrent requests. Resource monitoring showed stable memory and no sustained
+system-wide CPU exhaustion.
+
+To isolate the source, the benchmark was extended to monitor Uvicorn workers and
+the API was instrumented with server-stage timing headers. At concurrency 100,
+the prediction stage took approximately `0.057 ms` at p95 and total server time
+was approximately `7.481 ms` at p95, while client-observed p95 latency was
+approximately `612.41 ms`. This indicates that the prediction algorithm and
+measured application stages are not the dominant source of the concurrency
+latency.
+
+No application-code change is currently supported as a fix for increasing
+concurrency performance. The primary remediation path is to evaluate worker
+counts, ASGI server settings, connection configuration, host/runtime, and
+network placement. Code changes may still provide safeguards such as bounded
+concurrency, overload responses, metrics, and tracing, but these do not increase
+the underlying capacity.
+
+See the complete [concurrency degradation incident report](docs/incident-report-concurrency.md)
+for the investigation evidence, conclusions, and remediation plan.
+
 ## Incident Analysis
 
 The following incidents were identified and resolved during development:
