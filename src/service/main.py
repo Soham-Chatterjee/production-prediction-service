@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from .api.routes import router
 from src.schemas.exceptions import ModelInitializationError, InvalidRequest, UnknownAPIException
 from src.service.api.dependencies import get_engine
+import time
 
 
 @asynccontextmanager
@@ -29,6 +30,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 app.include_router(router)
+
+
+@app.middleware("http")
+async def add_timing_headers(request: Request, call_next):
+    started = time.perf_counter()
+    response = await call_next(request)
+    total_ms = (time.perf_counter() - started) * 1000
+    response.headers["X-Server-Total-Time-Ms"] = f"{total_ms:.3f}"
+    for name, value in getattr(request.state, "prediction_timing", {}).items():
+        header_name = name.removesuffix("_ms").replace("_", "-").title()
+        response.headers[f"X-Server-{header_name}-Ms"] = f"{value:.3f}"
+    return response
 
 
 @app.exception_handler(RequestValidationError)

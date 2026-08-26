@@ -6,6 +6,7 @@ from src.schemas.requests import PredictionRequest
 from src.schemas.exceptions import InvalidRequest, MissingRequiredFeatures, UnknownAPIException, ModelInitializationError
 
 import uuid
+import time
 
 router = APIRouter()
 
@@ -46,18 +47,25 @@ def predict(prediction_request: PredictionRequest, request: Request):
     """
     Endpoint to make predictions using the deployed model.
     """
+    engine_lookup_started = time.perf_counter()
     engine = _get_engine_from_state(request)
+    engine_lookup_ms = (time.perf_counter() - engine_lookup_started) * 1000
+
+    feature_validation_started = time.perf_counter()
     expected_features = set(engine.metadata.features.keys())
     missing_features = expected_features - set(prediction_request.features.keys())
+    feature_validation_ms = (time.perf_counter() - feature_validation_started) * 1000
 
     if missing_features:
         raise InvalidRequest(f"Missing required features: {', '.join(sorted(missing_features))}")
     
     try:
-
+        prediction_started = time.perf_counter()
         prediction = engine.predict(prediction_request)
+        prediction_ms = (time.perf_counter() - prediction_started) * 1000
 
-        return PredictionResponse(
+        response_started = time.perf_counter()
+        response = PredictionResponse(
             response_id=str(uuid.uuid4()),
             request_id=prediction_request.request_id,
             prediction={
@@ -72,6 +80,13 @@ def predict(prediction_request: PredictionRequest, request: Request):
                 "processing_time_ms": prediction.processing_time_ms
             }
         )
+        request.state.prediction_timing = {
+            "engine_lookup_ms": engine_lookup_ms,
+            "feature_validation_ms": feature_validation_ms,
+            "prediction_ms": prediction_ms,
+            "response_creation_ms": (time.perf_counter() - response_started) * 1000,
+        }
+        return response
     except MissingRequiredFeatures as e:
         raise InvalidRequest(str(e)) from e
 
